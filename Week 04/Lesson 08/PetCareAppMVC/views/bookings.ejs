@@ -40,6 +40,7 @@
               <th scope="col">Price</th>
               <th scope="col">Booking Status</th>
               <th scope="col">Payment Status</th>
+              <th scope="col">Action</th>
             </tr>
           </thead>
           <tbody>
@@ -58,12 +59,22 @@
                     <span class="text-secondary">No payment record</span>
                   <% } %>
                 </td>
+                <td>
+                  <% if (bookings[i].payment_status === 'success') { %>
+                    <span class="text-success">Paid (demo)</span>
+                  <% } else if (bookings[i].payment_status === 'pending' || bookings[i].payment_status === 'failed') { %>
+                    <form action="/payments/bookings/<%= bookings[i].booking_id %>/mock" method="POST">
+                      <input type="hidden" name="testStatus" value="APPROVED">
+                      <button type="submit" class="btn btn-sm btn-success">Click to pay</button>
+                    </form>
+                  <% } %>
+                </td>
               </tr>
             <% } %>
           </tbody>
         </table>
       </div>
-      <p class="text-secondary">Payments are pending. No payment has been processed by this app.</p>
+      <p class="text-secondary">Payments are simulated for this demo. No real money is charged.</p>
     <% } %>
   </main>
 

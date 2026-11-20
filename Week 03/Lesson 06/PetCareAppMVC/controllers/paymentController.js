@@ -2,9 +2,9 @@ const MockProvider = require('../services/mockPaymentProvider');
 const services = require('../data/mockServices');
 
 function preparePayment(req, res) {
-  const service = mockServices.find(
-    (item) => String(item.id) === req.params.serviceId
-  );
+  const service = services.find(
+  (item) => String(item.id) === req.params.serviceId
+);
 
   if (!service) {
     return res.status(404).json({ error: 'Service not found' });

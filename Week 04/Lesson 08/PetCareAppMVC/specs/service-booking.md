@@ -3,8 +3,9 @@
 ## About this sample
 
 This specification describes the service-booking flow in the Week 4, Lesson 8
-PetCareAppMVC application. It documents the current database-backed behaviour:
-creating a booking and pending payment record does not process a payment.
+PetCareAppMVC application. Booking creation records a pending booking and
+payment. A separate mock-payment action can simulate a provider outcome; it
+never charges real money.
 
 The sample scenario uses Clara, her cat Mira, Basic Bath, and 3 November 2026.
 The date is valid only when it is today or a future date at submission time.
@@ -12,10 +13,11 @@ The date is valid only when it is today or a future date at submission time.
 ## 1. User goal
 
 As a signed-in pet owner, I want to choose one of my pets, an available service,
-and a booking date so that I can create a booking and review its status.
+and a booking date so that I can create a booking, simulate payment, and review
+its status.
 
-The app records the booking and its payment as pending. Booking a service does
-not charge the customer or confirm that payment has been made.
+The booking starts as pending. An approved mock payment changes the payment to
+`success` and the booking to `confirmed`.
 
 ## 2. Scope
 
@@ -29,13 +31,15 @@ not charge the customer or confirm that payment has been made.
 - Save the booking and its pending payment record in one database transaction.
 - Preserve the service price at booking time as the booking price.
 - Show the customer's booking and payment statuses in Booking History.
+- Allow the customer to simulate an approved, pending, or declined payment for
+  their own booking.
+- Update payment and booking statuses together after the mock provider returns.
 - Display validation, unavailable-item, and database error outcomes.
 
 ### Not included
 
-- Real payment processing, payment-provider integration, or collection of
-  payment credentials.
-- Confirming a booking based on payment-provider approval.
+- Real payment processing, real payment-provider integration, or collection
+  of payment credentials.
 - Cancelling or rescheduling bookings.
 - Appointment time slots, capacity checks, or staff assignment.
 - Booking a pet owned by another customer.
@@ -53,11 +57,16 @@ not charge the customer or confirm that payment has been made.
 6. On success, the app displays a success message and redirects the customer to
    Booking History.
 7. Booking History displays the date, pet, service, booked price, booking
-   status, and payment status.
+   status, payment status, and a mock-payment action when payment is not
+   successful.
+8. The customer can simulate a payment result. An approved result sets payment
+   status to `success` and booking status to `confirmed`; a pending or declined
+   result does not confirm the booking.
 
 If validation fails, the app displays an error and does not create records. If
 the pet or service is unavailable, the app rejects the booking. If a database
-error occurs, the app logs the error and does not report success.
+error occurs, the app logs the error and does not report success. Mock payment
+does not collect credentials or charge money.
 
 ## 4. Requests
 
@@ -66,6 +75,7 @@ error occurs, the app logs the error and does not report success.
 | View available services and booking form | `GET` | `/services` | Required |
 | Create a booking | `POST` | `/services/book` | Required |
 | View booking history | `GET` | `/bookings` | Required |
+| Simulate payment for an owned booking | `POST` | `/payments/bookings/:bookingId/mock` | Required |
 
 An optional `petId` query parameter can preselect a pet on the service page:
 
@@ -111,17 +121,20 @@ row in `payments`.
 | Booking | `service_id` | The selected active service |
 | Booking | `booking_date` | The valid date submitted by the customer |
 | Booking | `booked_price` | The selected service's price at booking time |
-| Booking | `booking_status` | `pending` |
+| Booking | `booking_status` | `pending` at creation; `confirmed` after an approved mock payment |
 | Payment | `booking_id` | The newly created booking ID |
 | Payment | `amount` | The booking's `booked_price` |
-| Payment | `payment_status` | `pending` |
+| Payment | `payment_status` | `pending` at creation; `success`, `pending`, or `failed` after a mock payment |
 
 The two records are created in a single transaction. If booking creation,
 payment creation, or transaction commit fails, the transaction is rolled back;
 the app must not show a success message.
 
-Creating these records does not contact a payment provider, charge the customer,
-or change either status from `pending`.
+Creating these records does not contact a payment provider or charge the
+customer. A later mock payment updates both records in one transaction. An
+approved result sets payment status to `success` and booking status to
+`confirmed`; a pending result keeps both pending; a declined result sets
+payment status to `failed` and booking status to `payment_failed`.
 
 ## 7. Responses and user-visible outcomes
 
@@ -132,6 +145,31 @@ message:
 
 ```text
 Booking created. Payment is pending; no payment has been processed.
+```
+
+### Mock payment outcomes
+
+The Booking History page offers a clearly labeled action to simulate an
+approved payment. The mock provider can also return pending or declined outcomes
+for testing. These outcomes never represent a real charge.
+
+On approval, redirect to `/bookings` and show:
+
+```text
+Mock payment successful. Booking confirmed; no money was charged.
+```
+
+On a pending result, keep both records pending and show:
+
+```text
+Mock payment is pending.
+```
+
+On a declined result, set payment status to `failed`, booking status to
+`payment_failed`, and show:
+
+```text
+Mock payment was declined. You can try again.
 ```
 
 ### Invalid form values
@@ -188,7 +226,24 @@ display `No payment record`.
   `pending`,
 - **and** redirects Clara to Booking History with the successful-booking
   message,
-- **and** does not process a payment.
+- **and** does not process a payment during booking creation.
+
+### AC9: Simulate an approved payment
+
+- **Given** a signed-in customer owns a booking with a pending payment,
+- **when** they choose the mock successful-payment action,
+- **then** the payment status becomes `success`,
+- **and** the booking status becomes `confirmed`,
+- **and** Booking History displays the updated statuses,
+- **and** no real money is charged.
+
+### AC10: Keep mock pending and declined outcomes unconfirmed
+
+- **Given** a signed-in customer owns a booking with a pending or failed
+  payment,
+- **when** the mock provider returns `PENDING` or `DECLINED`,
+- **then** the booking is not confirmed,
+- **and** Booking History displays the resulting payment and booking statuses.
 
 ### AC2: Accept today's date and future dates
 

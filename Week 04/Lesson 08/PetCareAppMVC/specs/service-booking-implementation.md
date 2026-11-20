@@ -15,7 +15,7 @@ changing them.
 
 | Resource | Use |
 | --- | --- |
-| [service-booking.md](service-booking.md) | Behaviour and acceptance criteria AC1-AC8 |
+| [service-booking.md](service-booking.md) | Behaviour and acceptance criteria AC1-AC10 |
 | [db.sql](../db.sql) | Table names, columns, relationships, and sample data |
 | [services.ejs](../views/services.ejs) | Service selection and booking form shell |
 | [bookings.ejs](../views/bookings.ejs) | Booking History shell |
@@ -24,10 +24,13 @@ changing them.
 | [auth.js](../middleware/auth.js) | Existing `isLoggedIn` middleware |
 | [petModel.js](../models/petModel.js) | Existing owned-pet query |
 | [navbar.ejs](../views/partials/navbar.ejs) | Existing shared navigation |
+| [mockPaymentProvider.js](../services/mockPaymentProvider.js) | Local provider simulator; no real charge |
 
 Start from an application with working login, `req.session.user`, flash
 messages, EJS rendering, and MySQL connectivity. The provided schema must be
 available in the intended development database.
+Booking History also supports a clearly labeled mock-payment action. It can
+simulate a provider outcome for demonstration, but never charges real money.
 
 **Do not automatically execute the SQL setup script.** It contains `DROP TABLE`
 statements. Obtain explicit approval before importing it or resetting any data.
@@ -45,14 +48,16 @@ implementation rather than overwriting working code.
 | [serviceController.js](../controllers/serviceController.js) | Validate inputs, call models, render pages, and manage messages/redirects |
 | [serviceModel.js](../models/serviceModel.js) | Retrieve active database services |
 | [serviceBookingModel.js](../models/serviceBookingModel.js) | Transactional booking/payment creation and owned-booking history |
+| [paymentController.js](../controllers/paymentController.js) | Handle the mock result for an owned booking |
+| [paymentRoutes.js](../routes/paymentRoutes.js) | Protect the booking-specific mock-payment action |
 | [app.js](../app.js) | Register the service router once |
 | [services.ejs](../views/services.ejs) | Bind supplied data to the existing form shell |
 | [bookings.ejs](../views/bookings.ejs) | Bind supplied data to the existing history shell |
 | [navbar.ejs](../views/partials/navbar.ejs) | Ensure signed-in users can reach services and history |
 
-Reuse the existing pet model, pool, authentication middleware, and session/flash
-configuration. No additional payment controller or payment-provider integration
-is required for this feature.
+Reuse the existing pet model, pool, authentication middleware, mock provider,
+and session/flash configuration. Do not connect a real payment provider or
+collect payment credentials.
 
 ## 3. Routing and middleware contract
 
@@ -61,6 +66,7 @@ is required for this feature.
 | `GET` | `/services` | `isLoggedIn` | `listServices` |
 | `POST` | `/services/book` | `isLoggedIn` | `createBooking` |
 | `GET` | `/bookings` | `isLoggedIn` | `listBookings` |
+| `POST` | `/payments/bookings/:bookingId/mock` | `isLoggedIn` | `payBooking` |
 
 Export an Express router from the service routes module. Mount it at the
 application root in [app.js](../app.js):
@@ -85,6 +91,7 @@ Use the existing CommonJS and callback-based MVC conventions.
 | `listServices(req, res)` | Session user; optional `req.query.petId` | Load owned pets and active services; preselect an owned pet; render `services` |
 | `createBooking(req, res)` | Session user; `petId`, `serviceId`, `bookingDate` from `req.body` | Validate form values; call transactional model; handle success, unavailability, and database errors |
 | `listBookings(req, res)` | Session user | Load owned-booking history; render `bookings` |
+| `payBooking(req, res)` | Session user, booking ID, optional test status | Load the owned booking, call the mock provider, and save its result |
 
 The controller must:
 
@@ -101,6 +108,15 @@ The controller must:
 - Redirect to `/bookings` only after the model reports a committed booking.
 - Return after sending or redirecting; do not send multiple responses.
 - Log database failures using the existing `console.error` convention.
+- Accept only the mock provider's `APPROVED`, `PENDING`, or `DECLINED` test
+  statuses. The Booking History action defaults to `APPROVED`.
+- Load the amount and owner from the database, never from client input. Save
+  the result only when the booking belongs to the signed-in customer.
+- Map `APPROVED` to payment `success` and booking `confirmed`; `PENDING` to
+  both statuses `pending`; and `DECLINED` to payment `failed` and booking
+  `payment_failed`.
+- Do not allow a successful payment to be processed again. Permit retry after
+  a pending or failed mock result.
 
 On a database save error, the existing implementation redirects to
 `/services?petId=<submittedPetId>`. Preselection must still verify ownership.
@@ -169,6 +185,15 @@ Export `serviceBookingModel.getBookingsByOwner(ownerId, callback)`.
 
 Use parameterised SQL for all request/session-derived values.
 
+### Mock payment record updates
+
+Export `getBookingForPayment(ownerId, bookingId, callback)` to return only a
+booking and payment owned by the signed-in customer. Export
+`updateMockPayment(ownerId, bookingId, paymentStatus, bookingStatus,
+paymentReference, callback)` to update both records in one transaction. Only
+pending or failed payment rows can be updated; report an unavailable result if
+the booking is not owned, has no payment, or has already succeeded.
+
 ## 6. Transaction and database integration
 
 Use one connection acquired from the shared pool for the entire transaction.
@@ -187,6 +212,8 @@ Do not run individual transaction queries through separate pool connections.
    Cleanup failures must not be silently presented as success.
 7. Release any acquired connection on every terminal path, including a failed
    transaction start, rollback, or successful commit.
+8. Apply mock payment and booking status changes in one transaction after the
+   mock provider returns.
 
 Use the supplied table/column names and foreign keys. Leave
 `payment_reference` unset (`NULL`) during pending-record creation. Do not add
@@ -238,6 +265,9 @@ Each booking-history row must expose:
 The existing model also selects `payment_reference` and `created_at`; the
 provided table does not need to display them.
 
+Show a mock successful-payment form only when the payment status is not
+`success`. Label it as a simulation and state that no real money is charged.
+
 MySQL decimal values may arrive as strings. Preserve the stored decimal price
 for persistence; the supplied shells use `Number(value).toFixed(2)` only to
 display Singapore-dollar amounts. Use escaped EJS output for user/database text.
@@ -261,7 +291,7 @@ display Singapore-dollar amounts. Use escaped EJS output for user/database text.
 6. Connect the shells and navigation without redesigning them.
 7. Run the application from the project root using `node app.js`. Restore
    dependencies with the existing package manifest only if they are missing.
-8. Verify AC1-AC8 and the regression checks in the behavioural specification.
+8. Verify AC1-AC10 and the regression checks in the behavioural specification.
 
 | Integration check | Behavioural criterion / evidence |
 | --- | --- |
@@ -272,6 +302,7 @@ display Singapore-dollar amounts. Use escaped EJS output for user/database text.
 | Correct render fields and owner-filtered ordering | AC7; history for different customers |
 | All three routes protected | AC8; signed-out redirects |
 | Existing login and journals | Behavioural regression checklist |
+| Approved, pending, and declined mock results | AC9-AC10; updated payment and booking states |
 
 Use a controlled date fixture for repeatable tests. The Clara/Mira example date
 is not a permanent valid date. Do not change the computer clock or break a
